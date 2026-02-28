@@ -1,24 +1,24 @@
 # BudgetBakers MCP Server
 
-MCP сервер для інтеграції Claude з [BudgetBakers Wallet](https://www.budgetbakers.com/) API. Дає Claude доступ до фінансових даних: рахунки, транзакції, категорії, аналітика витрат.
+MCP server for integrating Claude with the [BudgetBakers Wallet](https://www.budgetbakers.com/) API. Gives Claude access to financial data: accounts, transactions, categories, and spending analytics.
 
-## Встановлення
+## Setup
 
 ```bash
 npm install
 npm run build
 ```
 
-## Конфігурація
+## Configuration
 
-Додай в `~/.claude/settings.json` (або Claude Desktop config):
+Add to `~/.claude/settings.json` (or Claude Desktop config):
 
 ```json
 {
   "mcpServers": {
     "budgetbakers": {
       "command": "node",
-      "args": ["/Users/vadym/iOS/projects/budgetbakers-mcp/build/index.js"],
+      "args": ["<path-to-project>/build/index.js"],
       "env": {
         "BUDGETBAKERS_API_TOKEN": "<your-token>"
       }
@@ -27,35 +27,35 @@ npm run build
 }
 ```
 
-API токен можна отримати в налаштуваннях BudgetBakers Wallet.
+You can get the API token from BudgetBakers Wallet settings.
 
 ## Tools
 
-| Tool | Опис |
-|------|------|
-| `get_accounts` | Список рахунків з балансами. Фільтри: `currency`, `accountType` |
-| `get_categories` | Категорії доходів/витрат. Фільтр: `name` |
-| `get_labels` | Користувацькі теги. Фільтр: `name` |
-| `search_transactions` | Пошук транзакцій. Потребує `accountId`. Фільтри: дати, категорія, мерчант, сума, лейбл |
-| `get_transaction` | Деталі однієї транзакції по `id` |
-| `spending_by_category` | Витрати згруповані по категоріях за період |
-| `cashflow_summary` | Доходи, витрати, нетто за період |
-| `top_merchants` | Мерчанти з найбільшими витратами за період |
+| Tool | Description |
+|------|-------------|
+| `get_accounts` | List all accounts with balances. Filters: `currency`, `accountType` |
+| `get_categories` | Income/expense categories. Filter: `name` |
+| `get_labels` | User-defined tags. Filter: `name` |
+| `search_transactions` | Search transactions. Requires `accountId`. Filters: dates, category, payee, amount, label |
+| `get_transaction` | Full details of a single transaction by `id` |
+| `spending_by_category` | Spending grouped by category for a date range |
+| `cashflow_summary` | Income, expenses, and net cashflow for a date range |
+| `top_merchants` | Top merchants by spending for a date range |
 
-> `accountId` — обов'язковий параметр для транзакцій та аналітики. Спочатку викликай `get_accounts` щоб його отримати.
+> `accountId` is required for transactions and analytics tools. Call `get_accounts` first to get it.
 
-## Приклади запитів до Claude
+## Example prompts
 
-- "Покажи мої рахунки та баланси"
-- "Скільки я витратив у лютому?"
-- "На що я витрачаю найбільше грошей?"
-- "Топ-5 мерчантів за останній місяць"
-- "Знайди всі транзакції в Сільпо за січень"
+- "Show my accounts and balances"
+- "How much did I spend in February?"
+- "What do I spend the most money on?"
+- "Top 5 merchants this month"
+- "Find all transactions at Starbucks in January"
 
-## Технічні деталі
+## Technical details
 
 - TypeScript, ES2022, Node16 modules
-- Залежності: `@modelcontextprotocol/sdk`, `zod`
-- Підтримка `agentHints=true` — API повертає підказки про пагінацію, rate limits тощо
-- Автоматична пагінація через `nextPageUrl` з hints
-- Аналітичні tools агрегують дані на стороні сервера (API не має ендпоінтів для аналітики)
+- Dependencies: `@modelcontextprotocol/sdk`, `zod`
+- Supports `agentHints=true` — API returns hints about pagination, rate limits, etc.
+- Automatic pagination via `nextPageUrl` from hints
+- Analytics tools aggregate data server-side (API has no analytics endpoints)
