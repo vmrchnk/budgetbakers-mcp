@@ -19,10 +19,22 @@ export class ApiError extends Error {
   }
 }
 
+export interface AgentHint {
+  type: string;
+  severity: "instruction" | "warning" | "info";
+  message: string;
+  nextPageUrl?: string;
+}
+
+export interface ApiResponse<T> {
+  data: T;
+  hints: AgentHint[];
+}
+
 async function request<T>(
   path: string,
   params?: Record<string, string | number | undefined>,
-): Promise<T> {
+): Promise<ApiResponse<T>> {
   const url = new URL(`${BASE_URL}${path}`);
   if (params) {
     for (const [key, value] of Object.entries(params)) {
@@ -31,6 +43,7 @@ async function request<T>(
       }
     }
   }
+  url.searchParams.set("agentHints", "true");
 
   const response = await fetch(url.toString(), {
     headers: {
@@ -56,7 +69,48 @@ async function request<T>(
     );
   }
 
-  return response.json() as Promise<T>;
+  const json = await response.json();
+
+  // API may return { data, hints } envelope or raw array/object
+  if (json && typeof json === "object" && "hints" in json && "data" in json) {
+    const hints: AgentHint[] = Array.isArray(json.hints) ? json.hints : [];
+    for (const hint of hints) {
+      if (hint.severity === "warning") {
+        console.error(`[API hint] ${hint.type}: ${hint.message}`);
+      }
+    }
+    return { data: json.data as T, hints };
+  }
+
+  // Fallback: no hints envelope — raw response
+  return { data: json as T, hints: [] };
+}
+
+async function fetchByUrl<T>(fullUrl: string): Promise<ApiResponse<T>> {
+  const response = await fetch(fullUrl, {
+    headers: {
+      Authorization: `Bearer ${getToken()}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new ApiError(response.status, `API error ${response.status}`);
+  }
+
+  const json = await response.json();
+
+  if (json && typeof json === "object" && "hints" in json && "data" in json) {
+    const hints: AgentHint[] = Array.isArray(json.hints) ? json.hints : [];
+    for (const hint of hints) {
+      if (hint.severity === "warning") {
+        console.error(`[API hint] ${hint.type}: ${hint.message}`);
+      }
+    }
+    return { data: json.data as T, hints };
+  }
+
+  return { data: json as T, hints: [] };
 }
 
 export async function fetchAll<T>(
@@ -64,26 +118,33 @@ export async function fetchAll<T>(
   params?: Record<string, string | number | undefined>,
 ): Promise<T[]> {
   const all: T[] = [];
-  let offset = 0;
 
-  while (true) {
-    const page = await request<T[]>(path, {
-      ...params,
-      limit: PAGE_LIMIT,
-      offset,
-    });
+  let resp = await request<T[]>(path, {
+    ...params,
+    limit: PAGE_LIMIT,
+    offset: 0,
+  });
 
-    if (!Array.isArray(page)) {
-      // Some endpoints return the array directly, some wrap it
-      return page as unknown as T[];
+  const addPage = (data: unknown) => {
+    if (Array.isArray(data)) {
+      all.push(...data);
     }
+  };
 
-    all.push(...page);
+  addPage(resp.data);
 
-    if (page.length < PAGE_LIMIT) {
+  // Use pagination.has_more hint with nextPageUrl when available
+  while (true) {
+    const paginationHint = resp.hints.find(
+      (h) => h.type === "pagination.has_more" && h.nextPageUrl,
+    );
+
+    if (paginationHint?.nextPageUrl) {
+      resp = await fetchByUrl<T[]>(paginationHint.nextPageUrl);
+      addPage(resp.data);
+    } else {
       break;
     }
-    offset += PAGE_LIMIT;
   }
 
   return all;
@@ -93,5 +154,6 @@ export async function fetchOne<T>(
   path: string,
   params?: Record<string, string | number | undefined>,
 ): Promise<T> {
-  return request<T>(path, params);
+  const resp = await request<T>(path, params);
+  return resp.data;
 }
