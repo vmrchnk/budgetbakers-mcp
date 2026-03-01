@@ -24,6 +24,8 @@ export function registerLabelTools(server: McpServer) {
       const result = filtered.map((l) => ({
         id: l.id,
         name: l.name,
+        color: l.color,
+        archived: l.archived,
       }));
 
       return {

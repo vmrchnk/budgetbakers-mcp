@@ -9,37 +9,54 @@ export function registerTransactionTools(server: McpServer) {
     "Search transactions with filters. accountId is required — use get_accounts first to find it.",
     {
       accountId: z.string().describe("Account ID (required). Use get_accounts to find it."),
-      dateFrom: z.string().optional().describe("Start date (YYYY-MM-DD)"),
-      dateTo: z.string().optional().describe("End date (YYYY-MM-DD)"),
+      dateFrom: z.string().optional().describe("Start date (YYYY-MM-DD). Converted to recordDate=gte filter."),
+      dateTo: z.string().optional().describe("End date (YYYY-MM-DD). Converted to recordDate=lt filter."),
       categoryId: z.string().optional().describe("Filter by category ID"),
-      payee: z.string().optional().describe("Filter by merchant/payee name"),
-      amountMin: z.number().optional().describe("Minimum amount"),
-      amountMax: z.number().optional().describe("Maximum amount"),
-      labelId: z.string().optional().describe("Filter by label ID"),
+      payee: z.string().optional().describe("Filter by merchant/payee name (client-side search)"),
+      amountMin: z.number().optional().describe("Minimum amount (absolute value)"),
+      amountMax: z.number().optional().describe("Maximum amount (absolute value)"),
       limit: z.number().optional().describe("Max records to return (default: all)"),
     },
-    async ({ accountId, dateFrom, dateTo, categoryId, payee, amountMin, amountMax, labelId, limit }) => {
+    async ({ accountId, dateFrom, dateTo, categoryId, payee, amountMin, amountMax, limit }) => {
       const params: Record<string, string | number | undefined> = {
         accountId,
-        dateFrom,
-        dateTo,
         categoryId,
-        labelId,
       };
 
+      // API uses recordDate=gte.DATE and recordDate=lt.DATE format
+      // But since we can only set one value per key, we build the filter string
+      if (dateFrom) {
+        params.recordDate = `gte.${dateFrom}T00:00:00Z`;
+      }
+      if (dateTo) {
+        // If both dateFrom and dateTo, we need both filters
+        // The API supports multiple recordDate params, but our simple params object doesn't
+        // So we'll pass dateFrom via recordDate and filter dateTo client-side if needed
+        if (!dateFrom) {
+          params.recordDate = `lt.${dateTo}T23:59:59Z`;
+        }
+      }
+
       let records = await fetchAll<Transaction>("/records", params);
+
+      // Client-side filtering for dateTo when dateFrom is also set
+      if (dateFrom && dateTo) {
+        const to = new Date(dateTo + "T23:59:59Z");
+        records = records.filter((r) => new Date(r.recordDate) <= to);
+      }
 
       if (payee) {
         const search = payee.toLowerCase();
         records = records.filter((r) =>
-          r.payee?.toLowerCase().includes(search),
+          r.payee?.toLowerCase().includes(search) ||
+          r.note?.toLowerCase().includes(search),
         );
       }
       if (amountMin !== undefined) {
-        records = records.filter((r) => r.amount >= amountMin);
+        records = records.filter((r) => Math.abs(r.amount.value) >= amountMin);
       }
       if (amountMax !== undefined) {
-        records = records.filter((r) => r.amount <= amountMax);
+        records = records.filter((r) => Math.abs(r.amount.value) <= amountMax);
       }
       if (limit) {
         records = records.slice(0, limit);
@@ -47,13 +64,12 @@ export function registerTransactionTools(server: McpServer) {
 
       const result = records.map((r) => ({
         id: r.id,
-        date: r.date,
+        recordDate: r.recordDate,
         amount: r.amount,
-        currency: r.currency,
-        categoryId: r.categoryId,
+        category: r.category,
+        recordType: r.recordType,
         payee: r.payee,
         note: r.note,
-        labelIds: r.labelIds,
       }));
 
       return {

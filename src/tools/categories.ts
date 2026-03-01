@@ -24,8 +24,8 @@ export function registerCategoryTools(server: McpServer) {
       const result = filtered.map((c) => ({
         id: c.id,
         name: c.name,
-        parentId: c.parentId,
-        type: c.type,
+        color: c.color,
+        customCategory: c.customCategory,
       }));
 
       return {

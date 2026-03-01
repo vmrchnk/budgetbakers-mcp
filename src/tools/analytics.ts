@@ -1,14 +1,21 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { fetchAll } from "../api-client.js";
-import type { Transaction, Category } from "../types.js";
+import type { Transaction } from "../types.js";
 
 async function fetchTransactions(
   accountId: string,
   dateFrom: string,
   dateTo: string,
 ): Promise<Transaction[]> {
-  return fetchAll<Transaction>("/records", { accountId, dateFrom, dateTo });
+  // Fetch with dateFrom, then filter dateTo client-side
+  const records = await fetchAll<Transaction>("/records", {
+    accountId,
+    recordDate: `gte.${dateFrom}T00:00:00Z`,
+  });
+
+  const to = new Date(dateTo + "T23:59:59Z");
+  return records.filter((r) => new Date(r.recordDate) <= to);
 }
 
 export function registerAnalyticsTools(server: McpServer) {
@@ -21,37 +28,32 @@ export function registerAnalyticsTools(server: McpServer) {
       dateTo: z.string().describe("End date (YYYY-MM-DD)"),
     },
     async ({ accountId, dateFrom, dateTo }) => {
-      const [records, categories] = await Promise.all([
-        fetchTransactions(accountId, dateFrom, dateTo),
-        fetchAll<Category>("/categories"),
-      ]);
-
-      const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
+      const records = await fetchTransactions(accountId, dateFrom, dateTo);
 
       const grouped = new Map<
         string,
-        { totalAmount: number; count: number; currency: string }
+        { categoryName: string; totalAmount: number; count: number; currency: string }
       >();
 
       for (const r of records) {
-        if (r.amount >= 0) continue; // skip income
-        const catId = r.categoryId || "uncategorized";
+        if (r.recordType !== "expense") continue;
+        const catId = r.category?.id || "uncategorized";
+        const catName = r.category?.name || "Uncategorized";
         const existing = grouped.get(catId) || {
+          categoryName: catName,
           totalAmount: 0,
           count: 0,
-          currency: r.currency,
+          currency: r.amount.currencyCode,
         };
-        existing.totalAmount += Math.abs(r.amount);
+        existing.totalAmount += Math.abs(r.amount.value);
         existing.count++;
         grouped.set(catId, existing);
       }
 
-      const result = Array.from(grouped.entries())
-        .map(([catId, data]) => ({
-          categoryName: categoryMap.get(catId) || catId,
-          totalAmount: Math.round(data.totalAmount * 100) / 100,
-          count: data.count,
-          currency: data.currency,
+      const result = Array.from(grouped.values())
+        .map((d) => ({
+          ...d,
+          totalAmount: Math.round(d.totalAmount * 100) / 100,
         }))
         .sort((a, b) => b.totalAmount - a.totalAmount);
 
@@ -77,11 +79,11 @@ export function registerAnalyticsTools(server: McpServer) {
       let currency = "";
 
       for (const r of records) {
-        if (!currency) currency = r.currency;
-        if (r.amount > 0) {
-          income += r.amount;
+        if (!currency) currency = r.amount.currencyCode;
+        if (r.recordType === "income" || r.amount.value > 0) {
+          income += Math.abs(r.amount.value);
         } else {
-          expenses += Math.abs(r.amount);
+          expenses += Math.abs(r.amount.value);
         }
       }
 
@@ -115,10 +117,10 @@ export function registerAnalyticsTools(server: McpServer) {
       const grouped = new Map<string, { totalAmount: number; count: number }>();
 
       for (const r of records) {
-        if (r.amount >= 0) continue; // skip income
-        const payee = r.payee || "Unknown";
+        if (r.recordType !== "expense") continue;
+        const payee = r.payee || r.note || "Unknown";
         const existing = grouped.get(payee) || { totalAmount: 0, count: 0 };
-        existing.totalAmount += Math.abs(r.amount);
+        existing.totalAmount += Math.abs(r.amount.value);
         existing.count++;
         grouped.set(payee, existing);
       }
